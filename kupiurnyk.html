@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Купюрник</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1c2430; --muted:#6b7684; --accent:#0b6bcb; --line:#e2e6ea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14181d; --card:#1d232a; --text:#e8ecf0; --muted:#8c98a6; --accent:#4da3ff; --line:#2c343d; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; }
+  h1 { font-size:22px; margin:0; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  select { padding:8px; font-size:15px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--text); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px; margin-bottom:16px; }
+  h2 { font-size:15px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:flex; justify-content:space-between; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:13px; color:var(--muted); font-weight:500; padding:4px 0; }
+  th:last-child, td:last-child { text-align:right; }
+  td { padding:6px 0; border-top:1px solid var(--line); }
+  td.den { font-weight:600; width:30%; }
+  input { width:90px; padding:8px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+  input:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .sum { font-variant-numeric:tabular-nums; }
+  .total { background:var(--accent); color:#fff; border:0; display:flex; justify-content:space-between; align-items:center; font-size:20px; font-weight:700; }
+  .total small { display:block; font-weight:400; font-size:13px; opacity:.85; }
+  .sub { display:flex; justify-content:space-between; color:var(--muted); padding:0 4px 8px; font-size:14px; }
+  .toggle { display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:uppercase; }
+  .toggle input { width:20px; height:20px; padding:0; accent-color:var(--accent); }
+  .off #coinsBody { display:none; }
+  .off h2 { margin-bottom:0; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .printdate { display:none; color:var(--muted); margin:-8px 0 16px; }
+  @media print {
+    body { background:#fff; color:#000; padding:0; }
+    .actions, select { display:none; }
+    .printdate { display:block; }
+    .card, .card.total { background:#fff; color:#000; border:1px solid #999; break-inside:avoid; }
+    .total small { color:#444; }
+    input { border:0; background:none; color:#000; width:auto; padding:0; text-align:left; }
+    .toggle input { display:none; }
+  }
+  button { background:none; border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:8px 14px; font-size:14px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1 id="title">Купюрник</h1>
+    <select id="cur" aria-label="Валюта">
+      <option value="UAH">₴ Українська гривня (UAH)</option>
+      <option value="USD">$ Долар США (USD)</option>
+      <option value="EUR">€ Євро (EUR)</option>
+    </select>
+  </div>
+  <div class="printdate" id="printdate"></div>
+
+  <div class="card total">
+    <div>Загальна сума<small id="count">0 шт.</small></div>
+    <div id="grand">0 ₴</div>
+  </div>
+
+  <div class="card">
+    <h2><span>Банкноти</span><span id="notesSum">0 ₴</span></h2>
+    <table><thead><tr><th>Номінал</th><th>Кількість</th><th>Сума</th></tr></thead><tbody id="notes"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2><label class="toggle"><input type="checkbox" id="coinsOn"> Монети</label><span id="coinsSum">0 ₴</span></h2>
+    <div id="coinsBody">
+      <table><thead><tr><th>Номінал</th><th>Кількість</th><th>Сума</th></tr></thead><tbody id="coins"></tbody></table>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="pdf">Експорт у PDF</button>
+    <button id="csv">Експорт у таблицю (CSV)</button>
+    <button id="reset">Очистити все</button>
+  </div>
+</div>
+
+<script>
+// Номінали в мінорних одиницях (копійки / центи), щоб не мати проблем із дробами.
+const CURRENCIES = {
+  UAH: { code: 'UAH', symbol: '₴', pos: 'after', subUnit: null,
+         coins: [100, 200, 500, 1000],
+         notes: [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000] },
+  USD: { code: 'USD', symbol: '$', pos: 'before', subUnit: '¢',
+         coins: [1, 5, 10, 25, 50, 100],
+         notes: [100, 200, 500, 1000, 2000, 5000, 10000] },
+  EUR: { code: 'EUR', symbol: '€', pos: 'after', subUnit: ' ц',
+         coins: [1, 2, 5, 10, 20, 50, 100, 200],
+         notes: [500, 1000, 2000, 5000, 10000, 20000, 50000] },
+};
+
+const $ = id => document.getElementById(id);
+const curSelect = $('cur');
+const coinsToggle = $('coinsOn');
+let inputs = [];
+let qtys = {};              // { 'UAH-note-500': '3', ... } — кількості всіх валют
+let cur = CURRENCIES.UAH;
+
+const num = (minor, withFraction) => (minor / 100).toLocaleString('uk-UA', {
+  minimumFractionDigits: withFraction ? 2 : 0, maximumFractionDigits: 2 });
+
+function fmt(minor) {
+  const n = num(minor, minor % 100 !== 0);
+  return cur.pos === 'before' ? cur.symbol + n : n + ' ' + cur.symbol;
+}
+function denLabel(d) {
+  if (d < 100 && cur.subUnit) return d + cur.subUnit;
+  return fmt(d);
+}
+
+function build(tbodyId, denoms, kind) {
+  const tbody = $(tbodyId);
+  tbody.innerHTML = '';
+  denoms.forEach(d => {
+    const key = `${cur.code}-${kind}-${d}`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="den">${denLabel(d)}</td>
+      <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="0"></td>
+      <td class="sum"></td>`;
+    const input = tr.querySelector('input');
+    input.value = qtys[key] || '';
+    input.addEventListener('input', update);
+    input.addEventListener('focus', () => input.select());
+    tbody.appendChild(tr);
+    inputs.push({ kind, d, input, sumCell: tr.querySelector('.sum'), key });
+  });
+}
+
+function rebuild() {
+  inputs = [];
+  build('coins', cur.coins, 'coin');
+  build('notes', cur.notes, 'note');
+  $('title').textContent = 'Купюрник · ' + cur.code;
+}
+
+const qtyOf = r => Math.max(0, Math.floor(Number(r.input.value) || 0));
+
+function save() {
+  try {
+    localStorage.setItem('kupiurnyk', JSON.stringify({
+      v: 2, currency: cur.code, coinsEnabled: coinsToggle.checked, qtys }));
+  } catch (e) {}
+}
+
+function update() {
+  const totals = { coin: 0, note: 0 };
+  let pieces = 0;
+  const coinsOn = coinsToggle.checked;
+  coinsToggle.closest('.card').classList.toggle('off', !coinsOn);
+  inputs.forEach(r => {
+    qtys[r.key] = r.input.value;
+    const qty = (r.kind !== 'coin' || coinsOn) ? qtyOf(r) : 0;
+    const sum = qty * r.d;
+    r.sumCell.textContent = fmt(sum);
+    totals[r.kind] += sum;
+    pieces += qty;
+  });
+  $('coinsSum').textContent = fmt(totals.coin);
+  $('notesSum').textContent = fmt(totals.note);
+  $('grand').textContent = fmt(totals.coin + totals.note);
+  $('count').textContent = pieces + ' шт.';
+  save();
+}
+
+// Відновлення збереженого стану (разом зі старим форматом, де була лише гривня)
+try {
+  const saved = JSON.parse(localStorage.getItem('kupiurnyk') || '{}');
+  if (saved.v === 2) {
+    qtys = saved.qtys || {};
+    if (CURRENCIES[saved.currency]) cur = CURRENCIES[saved.currency];
+  } else {
+    for (const [k, v] of Object.entries(saved)) {
+      const m = /^(coin|note)-(\d+)$/.exec(k);
+      if (m && v) qtys[`UAH-${m[1]}-${Number(m[2]) * 100}`] = v;
+    }
+  }
+  if (saved.coinsEnabled === true) coinsToggle.checked = true;
+} catch (e) {}
+curSelect.value = cur.code;
+
+curSelect.addEventListener('change', () => {
+  cur = CURRENCIES[curSelect.value];
+  rebuild();
+  update();
+});
+coinsToggle.addEventListener('change', update);
+
+const nowStr = () => new Date().toLocaleString('uk-UA');
+
+$('pdf').addEventListener('click', () => {
+  $('printdate').textContent = nowStr();
+  window.print();
+});
+
+$('csv').addEventListener('click', () => {
+  const plain = minor => (minor / 100).toString().replace('.', ',');
+  const rows = [['Купюрник, ' + cur.code, nowStr()], []];
+  const section = (title, kind) => {
+    const list = inputs.filter(r => r.kind === kind);
+    rows.push([title, 'Кількість', 'Сума ' + cur.code]);
+    list.forEach(r => rows.push([plain(r.d), qtyOf(r), plain(qtyOf(r) * r.d)]));
+    const sum = list.reduce((a, r) => a + qtyOf(r) * r.d, 0);
+    rows.push([title + ' разом', list.reduce((a, r) => a + qtyOf(r), 0), plain(sum)], []);
+    return sum;
+  };
+  let total = section('Банкноти', 'note');
+  if (coinsToggle.checked) total += section('Монети', 'coin');
+  rows.push(['Загальна сума', '', plain(total)]);
+  const csv = rows.map(r => r.join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kupiurnyk-${cur.code}-` + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+$('reset').addEventListener('click', () => {
+  if (!confirm('Очистити кількості для ' + cur.code + '?')) return;
+  inputs.forEach(r => { r.input.value = ''; });
+  update();
+});
+
+rebuild();
+update();
+</script>
+</body>
+</html>
